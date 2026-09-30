@@ -141,7 +141,7 @@
       { id: "review", label: "Review", desc: "Scope Creep Audit", icon: "fa-shield-halved" }
     ];
 
-    // --- Interactive Three.js 3D Emerald Core Component ---
+    // --- Interactive Three.js 3D MiniSoup Emerald Quantum Core ---
     function ThreeScene({ agentState, activeNode }) {
       const mountRef = useRef(null);
       const stateRef = useRef({ agentState, activeNode });
@@ -151,19 +151,22 @@
         const mount = mountRef.current;
         if (!mount) return;
 
-        const width = mount.clientWidth || 550;
-        const height = mount.clientHeight || 550;
+        const width = mount.clientWidth || 450;
+        const height = mount.clientHeight || 450;
 
         // Scene, Camera, Renderer
         const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 1000);
-        camera.position.set(0, 1.2, 5.2);
+        const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+        camera.position.set(0, 0.3, 4.6);
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        renderer.setSize(width, height);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
+        renderer.setSize(width, height, false);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.15;
+        renderer.domElement.style.width = "100%";
+        renderer.domElement.style.height = "100%";
+        renderer.domElement.style.display = "block";
         mount.appendChild(renderer.domElement);
 
         // OrbitControls
@@ -171,165 +174,168 @@
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
         controls.enableZoom = false;
+        controls.enablePan = false;
         controls.maxPolarAngle = Math.PI / 1.7;
-        controls.minPolarAngle = Math.PI / 3.5;
+        controls.minPolarAngle = Math.PI / 3.0;
 
         // Lighting
-        const ambientLight = new THREE.AmbientLight(0xffffff, 1.3);
+        const ambientLight = new THREE.AmbientLight(0x064e3b, 1.2);
         scene.add(ambientLight);
 
-        const keyLight = new THREE.DirectionalLight(0xa7f3d0, 2.5);
-        keyLight.position.set(5, 8, 6);
-        keyLight.castShadow = true;
-        keyLight.shadow.mapSize.width = 1024;
-        keyLight.shadow.mapSize.height = 1024;
+        const keyLight = new THREE.DirectionalLight(0xa7f3d0, 1.8);
+        keyLight.position.set(4, 5, 4);
         scene.add(keyLight);
 
-        const fillLight = new THREE.DirectionalLight(0x059669, 1.6);
-        fillLight.position.set(-6, -2, -4);
-        scene.add(fillLight);
+        const rimLight = new THREE.DirectionalLight(0x34d399, 1.2);
+        rimLight.position.set(-4, -2, -3);
+        scene.add(rimLight);
 
-        const pointCore = new THREE.PointLight(0x10b981, 3.5, 9);
+        const pointCore = new THREE.PointLight(0x10b981, 3.2, 8);
         pointCore.position.set(0, 0, 0);
         scene.add(pointCore);
 
-        // --- Materials: Lustrous Ceramic & Emerald Jade ---
-        const ceramicMat = new THREE.MeshPhysicalMaterial({
-          color: 0xf0fdf4,
-          roughness: 0.15,
-          metalness: 0.08,
-          clearcoat: 0.95,
-          clearcoatRoughness: 0.08
-        });
+        // --- Core Hierarchy ---
+        const coreGroup = new THREE.Group();
+        scene.add(coreGroup);
 
-        const emeraldJadeMat = new THREE.MeshStandardMaterial({
+        // 1. Inner Faceted Quantum Crystal
+        const crystalGeom = new THREE.OctahedronGeometry(0.72, 0);
+        const crystalMat = new THREE.MeshStandardMaterial({
           color: 0x059669,
-          roughness: 0.2,
+          emissive: 0x047857,
+          emissiveIntensity: 0.8,
+          roughness: 0.18,
           metalness: 0.85,
-          emissive: 0x064e3b,
-          emissiveIntensity: 0.45
+          flatShading: true
         });
+        const crystalMesh = new THREE.Mesh(crystalGeom, crystalMat);
+        coreGroup.add(crystalMesh);
 
-        const glowMat = new THREE.MeshBasicMaterial({
-          color: 0x34d399,
-          transparent: true,
-          opacity: 0.85
-        });
-
-        // --- Main 3D Pod Group ---
-        const podGroup = new THREE.Group();
-        scene.add(podGroup);
-
-        function createRoundedShell(w, h, d, r) {
-          const shape = new THREE.Shape();
-          const hw = w / 2 - r, hd = d / 2 - r;
-          shape.moveTo(-hw, -hd - r);
-          shape.lineTo(hw, -hd - r);
-          shape.quadraticCurveTo(hw + r, -hd - r, hw + r, -hd);
-          shape.lineTo(hw + r, hd);
-          shape.quadraticCurveTo(hw + r, hd + r, hw, hd + r);
-          shape.lineTo(-hw, hd + r);
-          shape.quadraticCurveTo(-hw - r, hd + r, -hw - r, hd);
-          shape.lineTo(-hw - r, -hd);
-          shape.quadraticCurveTo(-hw - r, -hd - r, -hw, -hd - r);
-
-          const extrudeSettings = {
-            depth: h,
-            bevelEnabled: true,
-            bevelSegments: 8,
-            steps: 2,
-            bevelSize: r,
-            bevelThickness: r
-          };
-          const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-          geom.center();
-          return geom;
-        }
-
-        const shellGeom = createRoundedShell(1.7, 0.45, 1.7, 0.25);
-
-        // Top Lid
-        const topLid = new THREE.Mesh(shellGeom, ceramicMat);
-        topLid.position.y = 0.55;
-        topLid.castShadow = true;
-        topLid.receiveShadow = true;
-        podGroup.add(topLid);
-
-        // Bottom Base
-        const bottomBase = new THREE.Mesh(shellGeom, ceramicMat);
-        bottomBase.position.y = -0.55;
-        bottomBase.castShadow = true;
-        bottomBase.receiveShadow = true;
-        podGroup.add(bottomBase);
-
-        // Deep Emerald Jade Core Layer
-        const coreGeom = createRoundedShell(1.5, 0.35, 1.5, 0.2);
-        const innerCore = new THREE.Mesh(coreGeom, emeraldJadeMat);
-        innerCore.position.y = 0;
-        podGroup.add(innerCore);
-
-        // Glowing Center Laser Ring / Power Band
-        const ringGeom = new THREE.TorusGeometry(1.22, 0.04, 16, 64);
-        ringGeom.rotateX(Math.PI / 2);
-        const glowRing = new THREE.Mesh(ringGeom, glowMat);
-        podGroup.add(glowRing);
-
-        // Outer Orbital Scanner Ring
-        const scannerGeom = new THREE.TorusGeometry(1.75, 0.015, 16, 96);
-        scannerGeom.rotateX(Math.PI / 2.3);
-        const scannerRing = new THREE.Mesh(scannerGeom, new THREE.MeshBasicMaterial({
+        // Crystal Wireframe Accent
+        const wireGeom = new THREE.WireframeGeometry(crystalGeom);
+        const wireMat = new THREE.LineBasicMaterial({
           color: 0x6ee7b7,
           transparent: true,
-          opacity: 0.5
-        }));
-        scene.add(scannerRing);
+          opacity: 0.75
+        });
+        const wireMesh = new THREE.LineSegments(wireGeom, wireMat);
+        coreGroup.add(wireMesh);
 
-        // Second Orbital Orbit
-        const scannerGeom2 = new THREE.TorusGeometry(2.1, 0.01, 16, 96);
-        scannerGeom2.rotateX(Math.PI / 1.7);
-        scannerGeom2.rotateY(Math.PI / 5);
-        const scannerRing2 = new THREE.Mesh(scannerGeom2, new THREE.MeshBasicMaterial({
+        // 2. Translucent Faceted Emerald Glass Shell
+        const shellGeom = new THREE.IcosahedronGeometry(1.15, 2);
+        const shellMat = new THREE.MeshPhysicalMaterial({
+          color: 0x10b981,
+          emissive: 0x064e3b,
+          emissiveIntensity: 0.25,
+          roughness: 0.12,
+          metalness: 0.15,
+          transmission: 0.65,
+          thickness: 0.6,
+          transparent: true,
+          opacity: 0.82,
+          clearcoat: 1.0,
+          clearcoatRoughness: 0.1
+        });
+        const shellMesh = new THREE.Mesh(shellGeom, shellMat);
+        coreGroup.add(shellMesh);
+
+        // 3. Central Equator Glowing Pulse Ring
+        const ringGeom = new THREE.TorusGeometry(1.22, 0.025, 16, 80);
+        ringGeom.rotateX(Math.PI / 2);
+        const glowRingMat = new THREE.MeshBasicMaterial({
           color: 0x34d399,
           transparent: true,
-          opacity: 0.38
-        }));
-        scene.add(scannerRing2);
+          opacity: 0.9
+        });
+        const glowRing = new THREE.Mesh(ringGeom, glowRingMat);
+        coreGroup.add(glowRing);
 
-        // Ground Contact Shadow
+        // 4. Orbital Gimbal Rings
+        const gimbal1Geom = new THREE.TorusGeometry(1.68, 0.018, 16, 96);
+        const ring1Mat = new THREE.MeshStandardMaterial({
+          color: 0x6ee7b7,
+          roughness: 0.2,
+          metalness: 0.9
+        });
+        const gimbal1 = new THREE.Mesh(gimbal1Geom, ring1Mat);
+        gimbal1.rotation.x = Math.PI / 3;
+        scene.add(gimbal1);
+
+        const gimbal2Geom = new THREE.TorusGeometry(1.98, 0.015, 16, 96);
+        const ring2Mat = new THREE.MeshStandardMaterial({
+          color: 0x34d399,
+          roughness: 0.25,
+          metalness: 0.85
+        });
+        const gimbal2 = new THREE.Mesh(gimbal2Geom, ring2Mat);
+        gimbal2.rotation.x = -Math.PI / 4;
+        gimbal2.rotation.y = Math.PI / 6;
+        scene.add(gimbal2);
+
+        // Satellite beads on rings
+        const satGeom = new THREE.SphereGeometry(0.055, 16, 16);
+        const satMat = new THREE.MeshBasicMaterial({ color: 0xa7f3d0 });
+        const sat1 = new THREE.Mesh(satGeom, satMat);
+        const sat2 = new THREE.Mesh(satGeom, satMat);
+        scene.add(sat1);
+        scene.add(sat2);
+
+        // 5. AST Floating Particle Dust (Semantic Chunks)
+        const particleCount = 70;
+        const particleGeom = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+        for (let i = 0; i < particleCount; i++) {
+          const theta = Math.random() * Math.PI * 2;
+          const phi = Math.acos((Math.random() * 2) - 1);
+          const r = 1.8 + Math.random() * 0.9;
+          positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+          positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+          positions[i * 3 + 2] = r * Math.cos(phi);
+        }
+        particleGeom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        const particleMat = new THREE.PointsMaterial({
+          color: 0xa7f3d0,
+          size: 0.035,
+          transparent: true,
+          opacity: 0.65
+        });
+        const particles = new THREE.Points(particleGeom, particleMat);
+        scene.add(particles);
+
+        // Ground Contact Glow Shadow
         const shadowCanvas = document.createElement("canvas");
         shadowCanvas.width = 128;
         shadowCanvas.height = 128;
         const sCtx = shadowCanvas.getContext("2d");
         const gradient = sCtx.createRadialGradient(64, 64, 0, 64, 64, 64);
-        gradient.addColorStop(0, "rgba(2, 44, 34, 0.55)");
-        gradient.addColorStop(0.5, "rgba(2, 44, 34, 0.2)");
+        gradient.addColorStop(0, "rgba(2, 44, 34, 0.7)");
+        gradient.addColorStop(0.5, "rgba(2, 44, 34, 0.25)");
         gradient.addColorStop(1, "rgba(0,0,0,0)");
         sCtx.fillStyle = gradient;
         sCtx.fillRect(0, 0, 128, 128);
 
         const shadowTexture = new THREE.CanvasTexture(shadowCanvas);
         const shadowPlane = new THREE.Mesh(
-          new THREE.PlaneGeometry(3.6, 3.6),
-          new THREE.MeshBasicMaterial({ map: shadowTexture, transparent: true, opacity: 0.85 })
+          new THREE.PlaneGeometry(3.2, 3.2),
+          new THREE.MeshBasicMaterial({ map: shadowTexture, transparent: true, opacity: 0.75 })
         );
         shadowPlane.rotation.x = -Math.PI / 2;
-        shadowPlane.position.y = -1.5;
+        shadowPlane.position.y = -1.6;
         scene.add(shadowPlane);
 
-        // Initial Tilt
-        podGroup.rotation.x = 0.35;
-        podGroup.rotation.y = -0.55;
-
-        // Resize handler
-        const handleResize = () => {
-          if (!mount) return;
-          const w = mount.clientWidth;
-          const h = mount.clientHeight;
-          camera.aspect = w / h;
-          camera.updateProjectionMatrix();
-          renderer.setSize(w, h);
-        };
-        window.addEventListener("resize", handleResize);
+        // Responsive ResizeObserver
+        const resizeObserver = new ResizeObserver((entries) => {
+          for (let entry of entries) {
+            const w = entry.contentRect.width;
+            const h = entry.contentRect.height;
+            if (w > 0 && h > 0) {
+              camera.aspect = w / h;
+              camera.updateProjectionMatrix();
+              renderer.setSize(w, h, false);
+            }
+          }
+        });
+        resizeObserver.observe(mount);
 
         // Animation Loop
         let clock = new THREE.Clock();
@@ -342,51 +348,87 @@
 
           controls.update();
 
-          // Float animation
-          const floatSpeed = st === "running" ? 2.5 : 1.2;
-          const floatAmp = 0.12;
-          podGroup.position.y = Math.sin(t * floatSpeed) * floatAmp;
+          // Float bobbing
+          const floatSpeed = st === "running" ? 2.4 : 1.2;
+          const floatAmp = 0.08;
+          coreGroup.position.y = Math.sin(t * floatSpeed) * floatAmp;
 
-          // Idle rotation
-          podGroup.rotation.y += 0.003;
-          scannerRing.rotation.z += 0.008;
-          scannerRing2.rotation.z -= 0.006;
+          // Gentle continuous rotation
+          crystalMesh.rotation.y += 0.008;
+          crystalMesh.rotation.x += 0.004;
+          wireMesh.rotation.y = crystalMesh.rotation.y;
+          wireMesh.rotation.x = crystalMesh.rotation.x;
 
-          // Reactive State Animations
+          shellMesh.rotation.y -= 0.003;
+          shellMesh.rotation.z += 0.002;
+
+          // Gimbal orbital rotation
+          gimbal1.rotation.z += 0.008;
+          gimbal1.rotation.y += 0.005;
+          gimbal2.rotation.z -= 0.006;
+          gimbal2.rotation.x += 0.004;
+
+          // Satellites orbiting along gimbals
+          const a1 = t * 1.2;
+          sat1.position.set(
+            Math.cos(a1) * 1.68 * Math.cos(gimbal1.rotation.x),
+            Math.sin(a1) * 1.68,
+            Math.cos(a1) * 1.68 * Math.sin(gimbal1.rotation.x)
+          );
+          const a2 = -t * 0.9;
+          sat2.position.set(
+            Math.cos(a2) * 1.98,
+            Math.sin(a2) * 1.98 * Math.cos(gimbal2.rotation.x),
+            Math.sin(a2) * 1.98 * Math.sin(gimbal2.rotation.x)
+          );
+
+          // Particles gentle drift
+          particles.rotation.y += 0.0015;
+          particles.rotation.x = Math.sin(t * 0.3) * 0.05;
+
+          // State-Reactive Animation
           if (st === "running") {
             if (node === "retrieve") {
-              // Scanner pulse
-              glowRing.scale.setScalar(1 + Math.sin(t * 8) * 0.08);
-              glowMat.color.setHex(0x38bdf8);
+              glowRingMat.color.setHex(0x38bdf8);
               pointCore.color.setHex(0x38bdf8);
-            } else if (node === "plan" || node === "edit") {
-              // Core separates to reveal inner mechanism
-              topLid.position.y = THREE.MathUtils.lerp(topLid.position.y, 0.85, 0.08);
-              bottomBase.position.y = THREE.MathUtils.lerp(bottomBase.position.y, -0.85, 0.08);
-              glowMat.color.setHex(0x34d399);
+              gimbal1.rotation.z += 0.02;
+              glowRing.scale.setScalar(1 + Math.sin(t * 8) * 0.08);
+            } else if (node === "plan") {
+              glowRingMat.color.setHex(0x34d399);
               pointCore.color.setHex(0x34d399);
+              crystalMesh.scale.setScalar(1 + Math.sin(t * 4) * 0.08);
+              wireMesh.scale.copy(crystalMesh.scale);
+            } else if (node === "edit") {
+              glowRingMat.color.setHex(0x10b981);
+              pointCore.color.setHex(0x10b981);
+              crystalMesh.rotation.y += 0.025;
+              wireMesh.rotation.y = crystalMesh.rotation.y;
             } else if (node === "test") {
-              scannerRing.rotation.z += 0.04;
-              scannerRing2.rotation.z -= 0.03;
-              glowMat.color.setHex(0x6ee7b7);
+              glowRingMat.color.setHex(0x6ee7b7);
               pointCore.color.setHex(0x6ee7b7);
+              gimbal1.rotation.z += 0.03;
+              gimbal2.rotation.z -= 0.03;
+            } else if (node === "revert_and_debug") {
+              // Test failure retry pulse: Amber
+              glowRingMat.color.setHex(0xf59e0b);
+              pointCore.color.setHex(0xf59e0b);
+              glowRing.scale.setScalar(1 + Math.sin(t * 10) * 0.12);
             } else if (node === "review") {
-              glowMat.color.setHex(0xa7f3d0);
+              glowRingMat.color.setHex(0xa7f3d0);
               pointCore.color.setHex(0xa7f3d0);
             }
           } else if (st === "completed") {
-            // Reassembled & Brilliant Emerald Pulse
-            topLid.position.y = THREE.MathUtils.lerp(topLid.position.y, 0.55, 0.08);
-            bottomBase.position.y = THREE.MathUtils.lerp(bottomBase.position.y, -0.55, 0.08);
-            glowMat.color.setHex(0x10b981);
+            glowRingMat.color.setHex(0x10b981);
             pointCore.color.setHex(0x10b981);
-            glowRing.scale.setScalar(1 + Math.sin(t * 3) * 0.05);
+            glowRing.scale.setScalar(1 + Math.sin(t * 3) * 0.04);
+            crystalMesh.scale.setScalar(1);
+            wireMesh.scale.setScalar(1);
           } else {
-            topLid.position.y = THREE.MathUtils.lerp(topLid.position.y, 0.55, 0.05);
-            bottomBase.position.y = THREE.MathUtils.lerp(bottomBase.position.y, -0.55, 0.05);
-            glowMat.color.setHex(0x34d399);
+            glowRingMat.color.setHex(0x34d399);
             pointCore.color.setHex(0x34d399);
             glowRing.scale.setScalar(1);
+            crystalMesh.scale.setScalar(1);
+            wireMesh.scale.setScalar(1);
           }
 
           renderer.render(scene, camera);
@@ -395,7 +437,7 @@
         animate();
 
         return () => {
-          window.removeEventListener("resize", handleResize);
+          resizeObserver.disconnect();
           cancelAnimationFrame(reqId);
           controls.dispose();
           renderer.dispose();
@@ -405,7 +447,7 @@
         };
       }, []);
 
-      return <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />;
+      return <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing select-none" />;
     }
 
     // --- Main App Component ---
@@ -913,18 +955,18 @@
             </div>
 
             {/* Right Column: Three.js 3D Emerald Core Stage (5 cols) */}
-            <div className="lg:col-span-5 h-[480px] lg:h-[580px] relative flex items-center justify-center">
+            <div className="lg:col-span-5 h-[440px] lg:h-[540px] relative flex items-center justify-center">
               
-              <div className="w-full h-full relative">
+              <div className="w-full h-full relative rounded-3xl overflow-hidden flex items-center justify-center">
                 <ThreeScene agentState={status} activeNode={activeNode} />
                 
                 {/* Floating Context Badges */}
-                <div className="absolute top-6 right-4 glass-pill px-4 py-2 rounded-2xl shadow-lg pointer-events-none flex items-center gap-2">
+                <div className="absolute top-4 right-4 glass-pill px-3.5 py-1.5 rounded-2xl shadow-lg pointer-events-none flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-300 animate-ping"></span>
                   <span className="text-xs font-bold text-white">Voyage AI / 37 AST Chunks</span>
                 </div>
 
-                <div className="absolute bottom-16 left-2 glass-pill px-4 py-2 rounded-2xl shadow-lg pointer-events-none flex items-center gap-2">
+                <div className="absolute bottom-4 left-4 glass-pill px-3.5 py-1.5 rounded-2xl shadow-lg pointer-events-none flex items-center gap-2">
                   <i className="fa-solid fa-shield-halved text-xs text-emerald-300"></i>
                   <span className="text-xs font-semibold text-white">Docker Sandbox Isolated</span>
                 </div>
@@ -932,7 +974,7 @@
                 {/* Drag to Explore Badge */}
                 <div className="absolute bottom-4 right-4 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-full border border-emerald-400/30 text-[11px] text-emerald-100 flex items-center gap-2 pointer-events-none">
                   <i className="fa-solid fa-arrows-up-down-left-right text-[10px] text-emerald-300"></i>
-                  <span>Drag to explore 3D core</span>
+                  <span>Drag to explore</span>
                 </div>
               </div>
 
