@@ -1,0 +1,1049 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MiniSoup | Autonomous Bug-Fixing Agent</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Google Fonts: Plus Jakarta Sans & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Three.js & OrbitControls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  
+  <!-- React 18 & Babel CDN -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: #047857;
+      color: #ecfdf5;
+      overflow-x: hidden;
+      margin: 0;
+      padding: 0;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    
+    /* Lush Greenish Emerald Canvas Gradient */
+    .bg-emerald-canvas {
+      background: radial-gradient(circle at 75% 30%, #10b981 0%, #059669 28%, #047857 60%, #022c22 100%);
+    }
+
+    /* Emerald Glass Panels */
+    .glass-card {
+      background: rgba(4, 30, 22, 0.88);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid rgba(52, 211, 153, 0.22);
+    }
+    
+    .glass-pill {
+      background: rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.28);
+    }
+
+    .diff-add {
+      background-color: rgba(16, 185, 129, 0.2);
+      color: #6ee7b7;
+      border-left: 3px solid #10b981;
+    }
+    .diff-del {
+      background-color: rgba(239, 68, 68, 0.2);
+      color: #fca5a5;
+      border-left: 3px solid #ef4444;
+    }
+    .diff-hdr {
+      background-color: rgba(45, 212, 191, 0.15);
+      color: #a7f3d0;
+    }
+
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.25);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(52, 211, 153, 0.35);
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(52, 211, 153, 0.6);
+    }
+
+    /* Glow Keyframes */
+    @keyframes emeraldPulse {
+      0%, 100% { transform: scale(1); opacity: 0.85; }
+      50% { transform: scale(1.06); opacity: 1; filter: drop-shadow(0 0 16px rgba(52, 211, 153, 0.6)); }
+    }
+    .animate-emerald-pulse {
+      animation: emeraldPulse 3s ease-in-out infinite;
+    }
+  </style>
+</head>
+<body class="bg-emerald-canvas min-h-screen relative flex flex-col justify-between selection:bg-emerald-900 selection:text-emerald-100">
+
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const FALLBACK_BUGS = [
+      {
+        id: "bug-3",
+        title: "Cart Quantity Off-By-One",
+        module: "ecommerce/cart.py",
+        description: "Off-by-one error in cart quantity update (setting quantity to 5 yields 6)."
+      },
+      {
+        id: "bug-1",
+        title: "JWT Cookie Logout on Refresh",
+        module: "ecommerce/auth.py",
+        description: "Users logged out on page refresh because cookies send 'auth_jwt' key."
+      },
+      {
+        id: "bug-2",
+        title: "Broken Order API & Auth Header",
+        module: "ecommerce/api_client.py",
+        description: "Calls deprecated /v1/order endpoint and misses Authorization header."
+      },
+      {
+        id: "bug-4",
+        title: "Null-Pointer Empty Checkout",
+        module: "ecommerce/checkout.py",
+        description: "Checking out with an empty cart crashes with IndexError on empty items list."
+      }
+    ];
+
+    const PIPELINE_STEPS = [
+      { id: "retrieve", label: "Retrieve", desc: "AST Semantic Chunks", icon: "fa-search" },
+      { id: "plan", label: "Plan", desc: "Root Cause Diagnosis", icon: "fa-brain" },
+      { id: "edit", label: "Edit", desc: "Surgical Code Patch", icon: "fa-code" },
+      { id: "test", label: "Test", desc: "Docker Sandbox", icon: "fa-flask" },
+      { id: "review", label: "Review", desc: "Scope Creep Audit", icon: "fa-shield-halved" }
+    ];
+
+    // --- Interactive Three.js 3D Emerald Core Component ---
+    function ThreeScene({ agentState, activeNode }) {
+      const mountRef = useRef(null);
+      const stateRef = useRef({ agentState, activeNode });
+      stateRef.current = { agentState, activeNode };
+
+      useEffect(() => {
+        const mount = mountRef.current;
+        if (!mount) return;
+
+        const width = mount.clientWidth || 550;
+        const height = mount.clientHeight || 550;
+
+        // Scene, Camera, Renderer
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 1000);
+        camera.position.set(0, 1.2, 5.2);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(width, height);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        mount.appendChild(renderer.domElement);
+
+        // OrbitControls
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.enableZoom = false;
+        controls.maxPolarAngle = Math.PI / 1.7;
+        controls.minPolarAngle = Math.PI / 3.5;
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.3);
+        scene.add(ambientLight);
+
+        const keyLight = new THREE.DirectionalLight(0xa7f3d0, 2.5);
+        keyLight.position.set(5, 8, 6);
+        keyLight.castShadow = true;
+        keyLight.shadow.mapSize.width = 1024;
+        keyLight.shadow.mapSize.height = 1024;
+        scene.add(keyLight);
+
+        const fillLight = new THREE.DirectionalLight(0x059669, 1.6);
+        fillLight.position.set(-6, -2, -4);
+        scene.add(fillLight);
+
+        const pointCore = new THREE.PointLight(0x10b981, 3.5, 9);
+        pointCore.position.set(0, 0, 0);
+        scene.add(pointCore);
+
+        // --- Materials: Lustrous Ceramic & Emerald Jade ---
+        const ceramicMat = new THREE.MeshPhysicalMaterial({
+          color: 0xf0fdf4,
+          roughness: 0.15,
+          metalness: 0.08,
+          clearcoat: 0.95,
+          clearcoatRoughness: 0.08
+        });
+
+        const emeraldJadeMat = new THREE.MeshStandardMaterial({
+          color: 0x059669,
+          roughness: 0.2,
+          metalness: 0.85,
+          emissive: 0x064e3b,
+          emissiveIntensity: 0.45
+        });
+
+        const glowMat = new THREE.MeshBasicMaterial({
+          color: 0x34d399,
+          transparent: true,
+          opacity: 0.85
+        });
+
+        // --- Main 3D Pod Group ---
+        const podGroup = new THREE.Group();
+        scene.add(podGroup);
+
+        function createRoundedShell(w, h, d, r) {
+          const shape = new THREE.Shape();
+          const hw = w / 2 - r, hd = d / 2 - r;
+          shape.moveTo(-hw, -hd - r);
+          shape.lineTo(hw, -hd - r);
+          shape.quadraticCurveTo(hw + r, -hd - r, hw + r, -hd);
+          shape.lineTo(hw + r, hd);
+          shape.quadraticCurveTo(hw + r, hd + r, hw, hd + r);
+          shape.lineTo(-hw, hd + r);
+          shape.quadraticCurveTo(-hw - r, hd + r, -hw - r, hd);
+          shape.lineTo(-hw - r, -hd);
+          shape.quadraticCurveTo(-hw - r, -hd - r, -hw, -hd - r);
+
+          const extrudeSettings = {
+            depth: h,
+            bevelEnabled: true,
+            bevelSegments: 8,
+            steps: 2,
+            bevelSize: r,
+            bevelThickness: r
+          };
+          const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+          geom.center();
+          return geom;
+        }
+
+        const shellGeom = createRoundedShell(1.7, 0.45, 1.7, 0.25);
+
+        // Top Lid
+        const topLid = new THREE.Mesh(shellGeom, ceramicMat);
+        topLid.position.y = 0.55;
+        topLid.castShadow = true;
+        topLid.receiveShadow = true;
+        podGroup.add(topLid);
+
+        // Bottom Base
+        const bottomBase = new THREE.Mesh(shellGeom, ceramicMat);
+        bottomBase.position.y = -0.55;
+        bottomBase.castShadow = true;
+        bottomBase.receiveShadow = true;
+        podGroup.add(bottomBase);
+
+        // Deep Emerald Jade Core Layer
+        const coreGeom = createRoundedShell(1.5, 0.35, 1.5, 0.2);
+        const innerCore = new THREE.Mesh(coreGeom, emeraldJadeMat);
+        innerCore.position.y = 0;
+        podGroup.add(innerCore);
+
+        // Glowing Center Laser Ring / Power Band
+        const ringGeom = new THREE.TorusGeometry(1.22, 0.04, 16, 64);
+        ringGeom.rotateX(Math.PI / 2);
+        const glowRing = new THREE.Mesh(ringGeom, glowMat);
+        podGroup.add(glowRing);
+
+        // Outer Orbital Scanner Ring
+        const scannerGeom = new THREE.TorusGeometry(1.75, 0.015, 16, 96);
+        scannerGeom.rotateX(Math.PI / 2.3);
+        const scannerRing = new THREE.Mesh(scannerGeom, new THREE.MeshBasicMaterial({
+          color: 0x6ee7b7,
+          transparent: true,
+          opacity: 0.5
+        }));
+        scene.add(scannerRing);
+
+        // Second Orbital Orbit
+        const scannerGeom2 = new THREE.TorusGeometry(2.1, 0.01, 16, 96);
+        scannerGeom2.rotateX(Math.PI / 1.7);
+        scannerGeom2.rotateY(Math.PI / 5);
+        const scannerRing2 = new THREE.Mesh(scannerGeom2, new THREE.MeshBasicMaterial({
+          color: 0x34d399,
+          transparent: true,
+          opacity: 0.38
+        }));
+        scene.add(scannerRing2);
+
+        // Ground Contact Shadow
+        const shadowCanvas = document.createElement("canvas");
+        shadowCanvas.width = 128;
+        shadowCanvas.height = 128;
+        const sCtx = shadowCanvas.getContext("2d");
+        const gradient = sCtx.createRadialGradient(64, 64, 0, 64, 64, 64);
+        gradient.addColorStop(0, "rgba(2, 44, 34, 0.55)");
+        gradient.addColorStop(0.5, "rgba(2, 44, 34, 0.2)");
+        gradient.addColorStop(1, "rgba(0,0,0,0)");
+        sCtx.fillStyle = gradient;
+        sCtx.fillRect(0, 0, 128, 128);
+
+        const shadowTexture = new THREE.CanvasTexture(shadowCanvas);
+        const shadowPlane = new THREE.Mesh(
+          new THREE.PlaneGeometry(3.6, 3.6),
+          new THREE.MeshBasicMaterial({ map: shadowTexture, transparent: true, opacity: 0.85 })
+        );
+        shadowPlane.rotation.x = -Math.PI / 2;
+        shadowPlane.position.y = -1.5;
+        scene.add(shadowPlane);
+
+        // Initial Tilt
+        podGroup.rotation.x = 0.35;
+        podGroup.rotation.y = -0.55;
+
+        // Resize handler
+        const handleResize = () => {
+          if (!mount) return;
+          const w = mount.clientWidth;
+          const h = mount.clientHeight;
+          camera.aspect = w / h;
+          camera.updateProjectionMatrix();
+          renderer.setSize(w, h);
+        };
+        window.addEventListener("resize", handleResize);
+
+        // Animation Loop
+        let clock = new THREE.Clock();
+        let reqId;
+
+        const animate = () => {
+          reqId = requestAnimationFrame(animate);
+          const t = clock.getElapsedTime();
+          const { agentState: st, activeNode: node } = stateRef.current;
+
+          controls.update();
+
+          // Float animation
+          const floatSpeed = st === "running" ? 2.5 : 1.2;
+          const floatAmp = 0.12;
+          podGroup.position.y = Math.sin(t * floatSpeed) * floatAmp;
+
+          // Idle rotation
+          podGroup.rotation.y += 0.003;
+          scannerRing.rotation.z += 0.008;
+          scannerRing2.rotation.z -= 0.006;
+
+          // Reactive State Animations
+          if (st === "running") {
+            if (node === "retrieve") {
+              // Scanner pulse
+              glowRing.scale.setScalar(1 + Math.sin(t * 8) * 0.08);
+              glowMat.color.setHex(0x38bdf8);
+              pointCore.color.setHex(0x38bdf8);
+            } else if (node === "plan" || node === "edit") {
+              // Core separates to reveal inner mechanism
+              topLid.position.y = THREE.MathUtils.lerp(topLid.position.y, 0.85, 0.08);
+              bottomBase.position.y = THREE.MathUtils.lerp(bottomBase.position.y, -0.85, 0.08);
+              glowMat.color.setHex(0x34d399);
+              pointCore.color.setHex(0x34d399);
+            } else if (node === "test") {
+              scannerRing.rotation.z += 0.04;
+              scannerRing2.rotation.z -= 0.03;
+              glowMat.color.setHex(0x6ee7b7);
+              pointCore.color.setHex(0x6ee7b7);
+            } else if (node === "review") {
+              glowMat.color.setHex(0xa7f3d0);
+              pointCore.color.setHex(0xa7f3d0);
+            }
+          } else if (st === "completed") {
+            // Reassembled & Brilliant Emerald Pulse
+            topLid.position.y = THREE.MathUtils.lerp(topLid.position.y, 0.55, 0.08);
+            bottomBase.position.y = THREE.MathUtils.lerp(bottomBase.position.y, -0.55, 0.08);
+            glowMat.color.setHex(0x10b981);
+            pointCore.color.setHex(0x10b981);
+            glowRing.scale.setScalar(1 + Math.sin(t * 3) * 0.05);
+          } else {
+            topLid.position.y = THREE.MathUtils.lerp(topLid.position.y, 0.55, 0.05);
+            bottomBase.position.y = THREE.MathUtils.lerp(bottomBase.position.y, -0.55, 0.05);
+            glowMat.color.setHex(0x34d399);
+            pointCore.color.setHex(0x34d399);
+            glowRing.scale.setScalar(1);
+          }
+
+          renderer.render(scene, camera);
+        };
+
+        animate();
+
+        return () => {
+          window.removeEventListener("resize", handleResize);
+          cancelAnimationFrame(reqId);
+          controls.dispose();
+          renderer.dispose();
+          if (mount && renderer.domElement) {
+            mount.removeChild(renderer.domElement);
+          }
+        };
+      }, []);
+
+      return <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />;
+    }
+
+    // --- Main App Component ---
+    function App() {
+      const [repoPath, setRepoPath] = useState("");
+      const [defaultRepoPath, setDefaultRepoPath] = useState("");
+      const [repoStatus, setRepoStatus] = useState({ exists: true, is_git: true, branch: "main" });
+      const [isRepoConfigOpen, setIsRepoConfigOpen] = useState(false);
+
+      const [bugReport, setBugReport] = useState("Off-by-one error in cart quantity update");
+      const [demoBugs, setDemoBugs] = useState(FALLBACK_BUGS);
+      const [status, setStatus] = useState("idle");
+      const [activeNode, setActiveNode] = useState(null);
+      const [logs, setLogs] = useState([]);
+      const [plan, setPlan] = useState("");
+      const [diff, setDiff] = useState("");
+      const [prBody, setPrBody] = useState("");
+      const [iteration, setIteration] = useState(0);
+      const [maxIterations, setMaxIterations] = useState(4);
+      const [reviewStatus, setReviewStatus] = useState(null);
+      const [reviewFeedback, setReviewFeedback] = useState("");
+      const [activeTab, setActiveTab] = useState("diff");
+      const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+      const [copied, setCopied] = useState(false);
+
+      const wsRef = useRef(null);
+      const logsEndRef = useRef(null);
+
+      useEffect(() => {
+        // Fetch default repo info
+        fetch("/api/repo-info")
+          .then(res => res.json())
+          .then(data => {
+            setDefaultRepoPath(data.default_path || "");
+            setRepoPath(data.default_path || "");
+            setRepoStatus({
+              exists: data.exists,
+              is_git: data.is_git,
+              branch: data.branch
+            });
+          })
+          .catch(() => {});
+
+        // Fetch demo bugs
+        fetch("/api/demo-bugs")
+          .then(res => res.json())
+          .then(data => {
+            if (Array.isArray(data) && data.length) setDemoBugs(data);
+          })
+          .catch(() => {});
+      }, []);
+
+      useEffect(() => {
+        if (logsEndRef.current) {
+          logsEndRef.current.scrollIntoView({ behavior: "smooth" });
+        }
+      }, [logs]);
+
+      const checkCustomRepo = (pathToCheck) => {
+        fetch(`/api/repo-info?path=${encodeURIComponent(pathToCheck)}`)
+          .then(res => res.json())
+          .then(data => {
+            setRepoStatus({
+              exists: data.exists,
+              is_git: data.is_git,
+              branch: data.branch
+            });
+          })
+          .catch(() => {});
+      };
+
+      const startBugFix = () => {
+        if (!bugReport.trim() || status === "running") return;
+
+        setStatus("running");
+        setLogs([]);
+        setPlan("");
+        setDiff("");
+        setPrBody("");
+        setActiveNode("retrieve");
+        setIteration(1);
+        setReviewStatus(null);
+        setReviewFeedback("");
+        setIsDrawerOpen(true);
+        setActiveTab("trace");
+
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = `${protocol}//${window.location.host}/ws/fix`;
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          ws.send(JSON.stringify({
+            bug_report: bugReport,
+            repo_path: repoPath,
+            max_iterations: maxIterations
+          }));
+        };
+
+        ws.onmessage = (event) => {
+          const msg = JSON.parse(event.data);
+
+          if (msg.type === "started") {
+            setLogs(prev => [...prev, {
+              timestamp: new Date().toLocaleTimeString(),
+              node: "system",
+              text: `Agent initialized on repo: ${msg.repo_path || repoPath}\nAttempt branch created: ${msg.branch}`
+            }]);
+          } else if (msg.type === "node_update") {
+            setActiveNode(msg.node);
+            if (msg.iteration) setIteration(msg.iteration);
+            if (msg.plan) setPlan(msg.plan);
+            if (msg.current_diff) setDiff(msg.current_diff);
+            if (msg.review_status && msg.review_status !== "pending") {
+              setReviewStatus(msg.review_status);
+            }
+            if (msg.review_feedback) {
+              setReviewFeedback(msg.review_feedback);
+            }
+
+            setLogs(prev => [...prev, {
+              timestamp: new Date().toLocaleTimeString(),
+              node: msg.node,
+              text: msg.log
+            }]);
+          } else if (msg.type === "completed") {
+            setStatus("completed");
+            setActiveNode(null);
+            setDiff(msg.diff);
+            setPrBody(msg.pr_body);
+            setReviewStatus(msg.review_status);
+            setLogs(prev => [...prev, {
+              timestamp: new Date().toLocaleTimeString(),
+              node: "orchestrator",
+              text: `Finished in ${msg.iterations} iteration(s). Status: ${msg.passed ? "PASSED" : "FAILED"}. Review: ${msg.review_status.toUpperCase()}.`
+            }]);
+            setActiveTab("diff");
+          } else if (msg.type === "error") {
+            setStatus("error");
+            setActiveNode(null);
+            setLogs(prev => [...prev, {
+              timestamp: new Date().toLocaleTimeString(),
+              node: "error",
+              text: `Error: ${msg.message}`
+            }]);
+          }
+        };
+
+        ws.onerror = (err) => {
+          setStatus("error");
+          console.error("WebSocket error:", err);
+        };
+      };
+
+      const copyToClipboard = (text) => {
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      };
+
+      const renderDiff = (diffText) => {
+        if (!diffText || !diffText.trim()) {
+          return (
+            <div className="p-12 text-center text-emerald-300/60 italic font-mono text-sm">
+              <i className="fa-solid fa-code-compare text-2xl text-emerald-400 mb-2 block"></i>
+              No code diff generated yet. Launch an autonomous fix to inspect surgical code modifications.
+            </div>
+          );
+        }
+
+        return (
+          <div className="bg-[#021c14] p-4 rounded-xl font-mono text-xs overflow-x-auto border border-emerald-500/20 leading-relaxed max-h-[380px] overflow-y-auto">
+            {diffText.split("\n").map((line, idx) => {
+              let cls = "text-emerald-100 px-2 py-0.5 whitespace-pre";
+              if (line.startsWith("+") && !line.startsWith("+++")) cls = "diff-add px-2 py-0.5 whitespace-pre";
+              else if (line.startsWith("-") && !line.startsWith("---")) cls = "diff-del px-2 py-0.5 whitespace-pre";
+              else if (line.startsWith("@@") || line.startsWith("diff --git")) cls = "diff-hdr px-2 py-0.5 font-bold whitespace-pre";
+              return <div key={idx} className={cls}>{line || " "}</div>;
+            })}
+          </div>
+        );
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col justify-between relative overflow-hidden">
+          
+          {/* Top Navigation */}
+          <nav className="relative z-20 max-w-7xl w-full mx-auto px-6 py-6 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {/* MiniSoup Brand Logo (AI Steaming Soup Bowl) */}
+              <div className="w-10 h-10 rounded-2xl bg-white/15 backdrop-blur-md flex items-center justify-center border border-emerald-300/40 shadow-lg shadow-emerald-950/20 text-emerald-200">
+                <i className="fa-solid fa-bowl-rice text-xl"></i>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-extrabold tracking-tight text-white drop-shadow-sm">MiniSoup</span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/20 text-emerald-100 uppercase tracking-widest border border-white/25">AI</span>
+              </div>
+            </div>
+
+            {/* Navigation & Telemetry Badges */}
+            <div className="hidden md:flex items-center gap-6 text-sm font-medium text-emerald-50/90">
+              <button 
+                onClick={() => setIsRepoConfigOpen(!isRepoConfigOpen)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 transition-all border border-white/20 text-xs"
+              >
+                <i className="fa-solid fa-folder-tree text-emerald-300"></i>
+                <span className="font-mono truncate max-w-[200px]">{repoPath ? repoPath.split(/[/\\]/).pop() || repoPath : "target_repo"}</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-300"></span>
+              </button>
+
+              <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 text-white text-xs border border-white/25">
+                <span className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse"></span>
+                Gemini 2.5 Flash + Voyage AI
+              </span>
+            </div>
+
+            {/* Right Action */}
+            <div className="flex items-center gap-3">
+              <button 
+                onClick={() => setIsDrawerOpen(!isDrawerOpen)}
+                className="px-4 py-2 rounded-full bg-white text-emerald-950 text-xs font-bold hover:bg-emerald-50 transition-all flex items-center gap-2 shadow-sm"
+              >
+                <span>{isDrawerOpen ? "Close Inspector" : "Open Inspector"}</span>
+                <i className={`fa-solid ${isDrawerOpen ? "fa-xmark" : "fa-arrow-up-right-from-square"} text-[10px]`}></i>
+              </button>
+            </div>
+          </nav>
+
+          {/* Hero Section */}
+          <main className="relative z-10 max-w-7xl w-full mx-auto px-6 py-4 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+            
+            {/* Left Column: Editorial Content & Controls (7 cols) */}
+            <div className="lg:col-span-7 space-y-5 pt-1 lg:pt-0">
+              
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 border border-white/25 text-emerald-100 text-xs font-semibold tracking-wide uppercase">
+                <i className="fa-solid fa-wand-magic-sparkles text-emerald-300"></i>
+                <span>01 / AUTONOMOUS CODE REPAIR ENGINE</span>
+              </div>
+
+              <div className="space-y-2.5">
+                <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-white leading-[1.04] drop-shadow-sm">
+                  Less busy.<br />
+                  More brilliant.
+                </h1>
+                <p className="text-base sm:text-lg text-emerald-50/90 max-w-xl font-normal leading-relaxed">
+                  MiniSoup synthesizes bug reports into verified, surgical git pull requests. Tree-sitter AST retrieval, isolated Docker containers, and zero auto-merges.
+                </p>
+              </div>
+
+              {/* Target Codebase Repository Configuration Panel */}
+              <div className="glass-card p-4 rounded-3xl shadow-2xl max-w-xl space-y-3.5 border-emerald-400/30">
+                
+                {/* Repo Path Input Section */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-200/80 uppercase tracking-wider px-1">
+                    <span className="flex items-center gap-1.5">
+                      <i className="fa-solid fa-folder-open text-emerald-300"></i>
+                      <span>Target Repository To Fix</span>
+                    </span>
+                    {repoStatus.exists ? (
+                      <span className="text-emerald-300 font-mono text-[10px] flex items-center gap-1">
+                        <i className="fa-solid fa-code-branch"></i> branch: {repoStatus.branch}
+                      </span>
+                    ) : (
+                      <span className="text-rose-300 text-[10px] font-bold">Path not found</span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 bg-black/30 border border-emerald-400/30 rounded-2xl px-3.5 py-2.5 focus-within:border-emerald-300 transition-all">
+                    <i className="fa-solid fa-code-commit text-emerald-300 text-xs"></i>
+                    <input
+                      type="text"
+                      value={repoPath}
+                      onChange={(e) => {
+                        setRepoPath(e.target.value);
+                        checkCustomRepo(e.target.value);
+                      }}
+                      placeholder="Enter absolute or relative path to git repo..."
+                      className="w-full bg-transparent text-xs font-mono text-emerald-100 placeholder-emerald-300/40 focus:outline-none"
+                    />
+                    {defaultRepoPath && repoPath !== defaultRepoPath && (
+                      <button
+                        onClick={() => {
+                          setRepoPath(defaultRepoPath);
+                          checkCustomRepo(defaultRepoPath);
+                        }}
+                        className="text-[10px] font-semibold text-emerald-300 hover:text-white underline whitespace-nowrap"
+                        title="Reset to default seed repo"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Bug Input Field */}
+                <div className="space-y-1.5">
+                  <div className="text-[11px] font-semibold text-emerald-200/80 uppercase tracking-wider px-1">
+                    Bug Description or Natural Language Issue
+                  </div>
+                  <div className="flex items-center gap-2 bg-black/30 border border-emerald-400/30 rounded-2xl px-4 py-3 focus-within:border-emerald-300 transition-all">
+                    <i className="fa-solid fa-bug text-emerald-300 text-sm"></i>
+                    <input
+                      type="text"
+                      value={bugReport}
+                      onChange={(e) => setBugReport(e.target.value)}
+                      placeholder="Describe issue or click a seed demo below..."
+                      className="w-full bg-transparent text-sm text-white placeholder-emerald-200/40 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Seed Demos Quick Pills */}
+                <div className="space-y-1.5 pt-0.5">
+                  <div className="text-[11px] font-semibold text-emerald-200/70 uppercase tracking-wider px-1">
+                    Seed Demo Presets (1-Click)
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {demoBugs.map((bug) => (
+                      <button
+                        key={bug.id}
+                        onClick={() => setBugReport(bug.title)}
+                        className={`text-xs px-3 py-1.5 rounded-xl border transition-all text-left flex items-center gap-1.5 ${
+                          bugReport === bug.title
+                            ? "bg-white text-emerald-950 border-white font-bold shadow-sm"
+                            : "bg-white/10 hover:bg-white/20 text-emerald-100 border-white/20"
+                        }`}
+                      >
+                        <i className={`fa-solid ${bug.id === 'bug-3' ? 'fa-cart-shopping' : bug.id === 'bug-1' ? 'fa-key' : bug.id === 'bug-2' ? 'fa-link' : 'fa-cash-register'} text-[10px] text-emerald-300`}></i>
+                        <span>{bug.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Primary Action Button */}
+                <div className="flex items-center gap-3 pt-1">
+                  <button
+                    onClick={startBugFix}
+                    disabled={status === "running"}
+                    className={`flex-1 py-3.5 px-6 rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-3 shadow-lg ${
+                      status === "running"
+                        ? "bg-emerald-950/80 text-emerald-300/50 cursor-not-allowed border border-emerald-500/20"
+                        : "bg-white text-emerald-950 hover:bg-emerald-50 hover:scale-[1.01] active:scale-[0.99] shadow-emerald-950/30"
+                    }`}
+                  >
+                    {status === "running" ? (
+                      <>
+                        <i className="fa-solid fa-circle-notch fa-spin text-emerald-600"></i>
+                        <span>Fixing autonomously in repo...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Run Autonomous Fix</span>
+                        <i className="fa-solid fa-arrow-right text-xs"></i>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setIsDrawerOpen(true)}
+                    className="p-3.5 rounded-2xl bg-white/10 hover:bg-white/20 text-white border border-white/20 transition-all text-sm flex items-center justify-center"
+                    title="View Inspection Drawer"
+                  >
+                    <i className="fa-solid fa-terminal text-emerald-300"></i>
+                  </button>
+                </div>
+              </div>
+
+              {/* Real-time State Stepper */}
+              <div className="max-w-xl pt-1">
+                <div className="flex items-center justify-between relative px-2">
+                  <div className="absolute top-4 left-6 right-6 h-0.5 bg-white/20 -z-0"></div>
+
+                  {PIPELINE_STEPS.map((step, idx) => {
+                    const isPassed = ["plan", "edit", "test", "review"].includes(step.id) && status === "completed";
+                    const isCurrent = activeNode === step.id;
+
+                    return (
+                      <div key={step.id} className="flex flex-col items-center relative z-10 space-y-1.5">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-md ${
+                          isCurrent
+                            ? "bg-white text-emerald-800 scale-125 ring-4 ring-emerald-300/40 animate-pulse"
+                            : isPassed
+                            ? "bg-emerald-300 text-emerald-950"
+                            : "bg-black/40 text-emerald-100/70 border border-white/25"
+                        }`}>
+                          {isPassed ? (
+                            <i className="fa-solid fa-check text-[10px]"></i>
+                          ) : (
+                            <i className={`fa-solid ${step.icon} text-[10px]`}></i>
+                          )}
+                        </div>
+                        <span className={`text-[11px] font-semibold tracking-tight ${
+                          isCurrent ? "text-white font-bold" : "text-emerald-100/80"
+                        }`}>
+                          {step.label}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+            </div>
+
+            {/* Right Column: Three.js 3D Emerald Core Stage (5 cols) */}
+            <div className="lg:col-span-5 h-[480px] lg:h-[580px] relative flex items-center justify-center">
+              
+              <div className="w-full h-full relative">
+                <ThreeScene agentState={status} activeNode={activeNode} />
+                
+                {/* Floating Context Badges */}
+                <div className="absolute top-6 right-4 glass-pill px-4 py-2 rounded-2xl shadow-lg pointer-events-none flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-300 animate-ping"></span>
+                  <span className="text-xs font-bold text-white">Voyage AI / 37 AST Chunks</span>
+                </div>
+
+                <div className="absolute bottom-16 left-2 glass-pill px-4 py-2 rounded-2xl shadow-lg pointer-events-none flex items-center gap-2">
+                  <i className="fa-solid fa-shield-halved text-xs text-emerald-300"></i>
+                  <span className="text-xs font-semibold text-white">Docker Sandbox Isolated</span>
+                </div>
+
+                {/* Drag to Explore Badge */}
+                <div className="absolute bottom-4 right-4 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-full border border-emerald-400/30 text-[11px] text-emerald-100 flex items-center gap-2 pointer-events-none">
+                  <i className="fa-solid fa-arrows-up-down-left-right text-[10px] text-emerald-300"></i>
+                  <span>Drag to explore 3D core</span>
+                </div>
+              </div>
+
+            </div>
+
+          </main>
+
+          {/* Slide-Up Inspector Drawer */}
+          <div className={`fixed inset-x-0 bottom-0 z-50 transition-all duration-500 ease-in-out ${
+            isDrawerOpen ? "translate-y-0" : "translate-y-[calc(100%-48px)]"
+          }`}>
+            <div className="max-w-5xl mx-auto glass-card rounded-t-3xl shadow-2xl border-b-0 overflow-hidden flex flex-col h-[520px]">
+              
+              {/* Drawer Handle Header */}
+              <div 
+                onClick={() => setIsDrawerOpen(!isDrawerOpen)}
+                className="px-6 py-3 bg-black/30 border-b border-emerald-400/20 flex items-center justify-between cursor-pointer select-none hover:bg-black/40 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="w-8 h-1 bg-emerald-400/40 rounded-full mx-auto hidden sm:block"></span>
+                  <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                    <i className="fa-solid fa-terminal text-emerald-400"></i> MiniSoup Inspection Console
+                  </span>
+                  
+                  {status === "completed" && (
+                    <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/40 font-bold">
+                      ✓ Approved & Tests Passed
+                    </span>
+                  )}
+                  {reviewStatus === "rejected" && (
+                    <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold">
+                      Scope Creep Rejection (Retry Triggered)
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-emerald-200/70 font-mono">
+                    {iteration > 0 ? `Attempt ${iteration}/${maxIterations}` : "Ready"}
+                  </span>
+                  <button className="text-white hover:text-emerald-300 text-sm">
+                    <i className={`fa-solid ${isDrawerOpen ? 'fa-chevron-down' : 'fa-chevron-up'}`}></i>
+                  </button>
+                </div>
+              </div>
+
+              {/* Tabs Navigation */}
+              <div className="flex border-b border-emerald-400/20 px-6 bg-black/40">
+                <button
+                  onClick={() => setActiveTab("diff")}
+                  className={`py-3 px-4 text-xs font-bold flex items-center gap-2 border-b-2 transition-all ${
+                    activeTab === "diff"
+                      ? "border-emerald-400 text-emerald-300"
+                      : "border-transparent text-emerald-100/60 hover:text-white"
+                  }`}
+                >
+                  <i className="fa-solid fa-code-compare"></i>
+                  <span>Unified Git Diff</span>
+                  {diff && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>}
+                </button>
+
+                <button
+                  onClick={() => setActiveTab("plan")}
+                  className={`py-3 px-4 text-xs font-bold flex items-center gap-2 border-b-2 transition-all ${
+                    activeTab === "plan"
+                      ? "border-emerald-400 text-emerald-300"
+                      : "border-transparent text-emerald-100/60 hover:text-white"
+                  }`}
+                >
+                  <i className="fa-solid fa-brain"></i>
+                  <span>Diagnostic Plan</span>
+                  {plan && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>}
+                </button>
+
+                <button
+                  onClick={() => setActiveTab("pr")}
+                  className={`py-3 px-4 text-xs font-bold flex items-center gap-2 border-b-2 transition-all ${
+                    activeTab === "pr"
+                      ? "border-emerald-400 text-emerald-300"
+                      : "border-transparent text-emerald-100/60 hover:text-white"
+                  }`}
+                >
+                  <i className="fa-solid fa-code-pull-request"></i>
+                  <span>Pull Request Summary</span>
+                  {prBody && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>}
+                </button>
+
+                <button
+                  onClick={() => setActiveTab("trace")}
+                  className={`py-3 px-4 text-xs font-bold flex items-center gap-2 border-b-2 transition-all ${
+                    activeTab === "trace"
+                      ? "border-emerald-400 text-emerald-300"
+                      : "border-transparent text-emerald-100/60 hover:text-white"
+                  }`}
+                >
+                  <i className="fa-solid fa-list-check"></i>
+                  <span>Live Stream Logs ({logs.length})</span>
+                </button>
+              </div>
+
+              {/* Tab Contents */}
+              <div className="flex-1 overflow-y-auto p-6 bg-black/50">
+                {activeTab === "diff" && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-mono text-emerald-200/70">
+                        Zero auto-merge: verified surgical diff against <span className="text-white font-bold">main</span>
+                      </div>
+                      {diff && (
+                        <button
+                          onClick={() => copyToClipboard(diff)}
+                          className="px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 text-xs font-medium flex items-center gap-1.5 transition-all"
+                        >
+                          <i className={`fa-solid ${copied ? 'fa-check' : 'fa-copy'}`}></i>
+                          <span>{copied ? "Copied Diff" : "Copy Diff"}</span>
+                        </button>
+                      )}
+                    </div>
+                    {renderDiff(diff)}
+                  </div>
+                )}
+
+                {activeTab === "plan" && (
+                  <div className="space-y-3">
+                    <div className="text-xs font-mono text-emerald-200/70">
+                      Architect Persona: Root cause analysis and step-by-step repair strategy
+                    </div>
+                    {plan ? (
+                      <div className="bg-[#021c14] p-5 rounded-xl border border-emerald-500/20 font-sans text-xs text-emerald-50 leading-relaxed whitespace-pre-wrap">
+                        {plan}
+                      </div>
+                    ) : (
+                      <div className="p-12 text-center text-emerald-300/60 italic font-mono text-sm">
+                        No diagnostic plan created yet. Run an autonomous fix to formulate a plan.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {activeTab === "pr" && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-mono text-emerald-200/70">
+                        Ready-to-copy PR body formatted for human engineering review
+                      </div>
+                      {prBody && (
+                        <button
+                          onClick={() => copyToClipboard(prBody)}
+                          className="px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 text-xs font-medium flex items-center gap-1.5 transition-all"
+                        >
+                          <i className={`fa-solid ${copied ? 'fa-check' : 'fa-copy'}`}></i>
+                          <span>{copied ? "Copied Markdown" : "Copy PR Markdown"}</span>
+                        </button>
+                      )}
+                    </div>
+                    {prBody ? (
+                      <div className="bg-[#021c14] p-5 rounded-xl border border-emerald-500/20 font-mono text-xs text-emerald-100 leading-relaxed whitespace-pre-wrap">
+                        {prBody}
+                      </div>
+                    ) : (
+                      <div className="p-12 text-center text-emerald-300/60 italic font-mono text-sm">
+                        PR body will appear here upon test passage and reviewer sign-off.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {activeTab === "trace" && (
+                  <div className="space-y-2 font-mono text-xs">
+                    {logs.length === 0 ? (
+                      <div className="p-12 text-center text-emerald-300/60 italic text-sm">
+                        WebSocket stream idle. Click "Run Autonomous Fix" to stream agent events live.
+                      </div>
+                    ) : (
+                      logs.map((log, idx) => (
+                        <div key={idx} className="p-3 rounded-lg bg-white/5 border border-emerald-500/10 space-y-1">
+                          <div className="flex items-center justify-between text-[10px] text-emerald-300/60">
+                            <span className="uppercase tracking-wider font-bold text-emerald-300">[{log.node}]</span>
+                            <span>{log.timestamp}</span>
+                          </div>
+                          <div className="text-emerald-100 whitespace-pre-wrap leading-relaxed">{log.text}</div>
+                        </div>
+                      ))
+                    )}
+                    <div ref={logsEndRef} />
+                  </div>
+                )}
+              </div>
+
+            </div>
+          </div>
+
+          {/* Footer Bar */}
+          <footer className="relative z-10 max-w-7xl w-full mx-auto px-6 py-4 flex flex-col sm:flex-row items-center justify-between text-xs text-emerald-100/70 border-t border-emerald-400/20 gap-2">
+            <div className="flex items-center gap-2">
+              <i className="fa-solid fa-bowl-rice text-emerald-300"></i>
+              <span>MiniSoup Autonomous Bug-Fixing Agent &bull; 2026</span>
+            </div>
+            <div className="flex items-center gap-6">
+              <span>LangGraph StateGraph</span>
+              <span>Gemini 2.5 Flash</span>
+              <span>Voyage AI</span>
+              <span>Docker Sandbox</span>
+            </div>
+          </footer>
+
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
