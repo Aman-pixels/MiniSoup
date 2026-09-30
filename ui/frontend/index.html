@@ -479,6 +479,9 @@
       const [maxIterations, setMaxIterations] = useState(4);
       const [reviewStatus, setReviewStatus] = useState(null);
       const [reviewFeedback, setReviewFeedback] = useState("");
+      const [testResult, setTestResult] = useState(null);
+      const [testFailedRetrying, setTestFailedRetrying] = useState(false);
+      const [completedStages, setCompletedStages] = useState(new Set());
       const [activeTab, setActiveTab] = useState("diff");
       const [isDrawerOpen, setIsDrawerOpen] = useState(false);
       const [copied, setCopied] = useState(false);
@@ -568,6 +571,9 @@
         setIteration(1);
         setReviewStatus(null);
         setReviewFeedback("");
+        setTestResult(null);
+        setTestFailedRetrying(false);
+        setCompletedStages(new Set());
         setIsDrawerOpen(true);
         setActiveTab("trace");
 
@@ -598,11 +604,40 @@
             if (msg.iteration) setIteration(msg.iteration);
             if (msg.plan) setPlan(msg.plan);
             if (msg.current_diff) setDiff(msg.current_diff);
+            if (msg.test_result) {
+              setTestResult(msg.test_result);
+              if (msg.test_result.passed === false) {
+                setTestFailedRetrying(true);
+              } else if (msg.test_result.passed === true) {
+                setTestFailedRetrying(false);
+              }
+            }
             if (msg.review_status && msg.review_status !== "pending") {
               setReviewStatus(msg.review_status);
             }
             if (msg.review_feedback) {
               setReviewFeedback(msg.review_feedback);
+            }
+
+            // Sequential stage progression tracking
+            if (msg.node === "retrieve") {
+              // Retrieve active
+            } else if (msg.node === "plan") {
+              setCompletedStages(prev => new Set([...prev, "retrieve"]));
+            } else if (msg.node === "edit") {
+              setCompletedStages(prev => new Set([...prev, "retrieve", "plan"]));
+            } else if (msg.node === "test") {
+              setCompletedStages(prev => new Set([...prev, "retrieve", "plan", "edit"]));
+              setTestFailedRetrying(false);
+            } else if (msg.node === "revert_and_debug") {
+              // Test failed, reverting and preparing next attempt
+              setTestFailedRetrying(true);
+              setCompletedStages(prev => new Set([...prev, "retrieve", "plan", "edit"]));
+            } else if (msg.node === "review") {
+              setTestFailedRetrying(false);
+              setCompletedStages(prev => new Set([...prev, "retrieve", "plan", "edit", "test"]));
+            } else if (msg.node === "revert_and_replan_after_review") {
+              setCompletedStages(prev => new Set([...prev, "retrieve", "plan", "edit", "test"]));
             }
 
             setLogs(prev => [...prev, {
@@ -616,6 +651,12 @@
             setDiff(msg.diff);
             setPrBody(msg.pr_body);
             setReviewStatus(msg.review_status);
+            setTestFailedRetrying(false);
+            if (msg.passed) {
+              setCompletedStages(new Set(["retrieve", "plan", "edit", "test", "review"]));
+            } else {
+              setCompletedStages(new Set(["retrieve", "plan", "edit"]));
+            }
             setLogs(prev => [...prev, {
               timestamp: new Date().toLocaleTimeString(),
               node: "orchestrator",
@@ -918,38 +959,95 @@
               </div>
 
               {/* Real-time State Stepper */}
-              <div className="max-w-xl pt-1">
-                <div className="flex items-center justify-between relative px-2">
-                  <div className="absolute top-4 left-6 right-6 h-0.5 bg-white/20 -z-0"></div>
+              <div className="max-w-xl pt-2 pb-1">
+                {(() => {
+                  let progressIdx = 0;
+                  if (status === "completed") {
+                    progressIdx = 4;
+                  } else if (activeNode === "review" || activeNode === "revert_and_replan_after_review") {
+                    progressIdx = 4;
+                  } else if (activeNode === "test" || activeNode === "revert_and_debug") {
+                    progressIdx = 3;
+                  } else if (activeNode === "edit") {
+                    progressIdx = 2;
+                  } else if (activeNode === "plan") {
+                    progressIdx = 1;
+                  } else if (activeNode === "retrieve") {
+                    progressIdx = 0;
+                  }
 
-                  {PIPELINE_STEPS.map((step, idx) => {
-                    const isPassed = ["plan", "edit", "test", "review"].includes(step.id) && status === "completed";
-                    const isCurrent = activeNode === step.id;
-
-                    return (
-                      <div key={step.id} className="flex flex-col items-center relative z-10 space-y-1.5">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-md ${
-                          isCurrent
-                            ? "bg-white text-emerald-800 scale-125 ring-4 ring-emerald-300/40 animate-pulse"
-                            : isPassed
-                            ? "bg-emerald-300 text-emerald-950"
-                            : "bg-black/40 text-emerald-100/70 border border-white/25"
-                        }`}>
-                          {isPassed ? (
-                            <i className="fa-solid fa-check text-[10px]"></i>
-                          ) : (
-                            <i className={`fa-solid ${step.icon} text-[10px]`}></i>
-                          )}
-                        </div>
-                        <span className={`text-[11px] font-semibold tracking-tight ${
-                          isCurrent ? "text-white font-bold" : "text-emerald-100/80"
-                        }`}>
-                          {step.label}
-                        </span>
+                  return (
+                    <div className="flex items-center justify-between relative px-3">
+                      {/* Connecting Line Track */}
+                      <div className="absolute top-4 left-6 right-6 h-0.5 bg-black/40 border-b border-white/10 -z-0">
+                        <div 
+                          className="h-full bg-gradient-to-r from-emerald-400 via-teal-300 to-emerald-200 transition-all duration-500 ease-out"
+                          style={{ width: `${(progressIdx / 4) * 100}%` }}
+                        />
                       </div>
-                    );
-                  })}
-                </div>
+
+                      {PIPELINE_STEPS.map((step, idx) => {
+                        const isCurrent = (
+                          activeNode === step.id ||
+                          (step.id === "test" && activeNode === "revert_and_debug") ||
+                          (step.id === "review" && activeNode === "revert_and_replan_after_review")
+                        );
+                        const isTestRetrying = step.id === "test" && (
+                          activeNode === "revert_and_debug" || 
+                          (testFailedRetrying && (activeNode === "edit" || activeNode === "test"))
+                        );
+                        const isPassed = completedStages.has(step.id) && !isTestRetrying;
+                        const isTerminalFailed = status === "completed" && !testResult?.passed && step.id === "test";
+
+                        let badgeCls = "bg-black/40 text-emerald-100/60 border border-white/20";
+                        let iconEl = <i className={`fa-solid ${step.icon} text-[10px]`}></i>;
+                        let labelCls = "text-emerald-100/70";
+                        let statusText = "Queued";
+                        let statusTextCls = "text-emerald-200/40";
+
+                        if (isTestRetrying) {
+                          badgeCls = "bg-amber-500/25 text-amber-300 border-2 border-amber-400 ring-4 ring-amber-400/30 scale-125 animate-pulse shadow-lg shadow-amber-500/20";
+                          iconEl = <i className="fa-solid fa-rotate-right fa-spin text-[10px] text-amber-300"></i>;
+                          labelCls = "text-amber-300 font-bold";
+                          statusText = `Retry #${iteration || 1}`;
+                          statusTextCls = "text-amber-300 font-bold bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-400/40 animate-pulse";
+                        } else if (isTerminalFailed) {
+                          badgeCls = "bg-rose-500/25 text-rose-300 border-2 border-rose-400 ring-4 ring-rose-500/30 scale-110 shadow-lg shadow-rose-500/20";
+                          iconEl = <i className="fa-solid fa-xmark text-[11px] text-rose-300"></i>;
+                          labelCls = "text-rose-300 font-bold";
+                          statusText = "Failed";
+                          statusTextCls = "text-rose-300 font-bold bg-rose-500/20 px-1.5 py-0.5 rounded border border-rose-400/40";
+                        } else if (isCurrent) {
+                          badgeCls = "bg-white text-emerald-950 scale-125 ring-4 ring-emerald-300/60 shadow-xl shadow-emerald-400/30 animate-pulse";
+                          iconEl = <i className={`fa-solid ${step.icon} text-[10px] text-emerald-950`}></i>;
+                          labelCls = "text-white font-bold";
+                          statusText = "Active";
+                          statusTextCls = "text-emerald-300 font-semibold bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-400/40 animate-pulse";
+                        } else if (isPassed) {
+                          badgeCls = "bg-emerald-400 text-emerald-950 font-bold shadow-md shadow-emerald-950/20";
+                          iconEl = <i className="fa-solid fa-check text-[10px]"></i>;
+                          labelCls = "text-emerald-100 font-semibold";
+                          statusText = "Passed";
+                          statusTextCls = "text-emerald-300/80";
+                        }
+
+                        return (
+                          <div key={step.id} className="flex flex-col items-center relative z-10 space-y-1">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${badgeCls}`}>
+                              {iconEl}
+                            </div>
+                            <span className={`text-[11px] tracking-tight ${labelCls}`}>
+                              {step.label}
+                            </span>
+                            <span className={`text-[9px] font-mono leading-none ${statusTextCls}`}>
+                              {statusText}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
 
             </div>
