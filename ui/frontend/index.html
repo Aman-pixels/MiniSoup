@@ -412,7 +412,17 @@
     function App() {
       const [repoPath, setRepoPath] = useState("");
       const [defaultRepoPath, setDefaultRepoPath] = useState("");
-      const [repoStatus, setRepoStatus] = useState({ exists: true, is_git: true, branch: "main" });
+      const [isValidatingRepo, setIsValidatingRepo] = useState(false);
+      const [repoStatus, setRepoStatus] = useState({
+        exists: true,
+        is_dir: true,
+        is_git: true,
+        branch: "main",
+        test_framework: "pytest",
+        test_command: "pytest",
+        is_valid: true,
+        status_summary: "valid"
+      });
       const [isRepoConfigOpen, setIsRepoConfigOpen] = useState(false);
 
       const [bugReport, setBugReport] = useState("Off-by-one error in cart quantity update");
@@ -434,8 +444,8 @@
       const wsRef = useRef(null);
       const logsEndRef = useRef(null);
 
+      // Initial load: fetch default repo info and demo bugs
       useEffect(() => {
-        // Fetch default repo info
         fetch("/api/repo-info")
           .then(res => res.json())
           .then(data => {
@@ -443,13 +453,17 @@
             setRepoPath(data.default_path || "");
             setRepoStatus({
               exists: data.exists,
+              is_dir: data.is_dir,
               is_git: data.is_git,
-              branch: data.branch
+              branch: data.branch,
+              test_framework: data.test_framework,
+              test_command: data.test_command,
+              is_valid: data.is_valid,
+              status_summary: data.status_summary
             });
           })
           .catch(() => {});
 
-        // Fetch demo bugs
         fetch("/api/demo-bugs")
           .then(res => res.json())
           .then(data => {
@@ -458,27 +472,50 @@
           .catch(() => {});
       }, []);
 
+      // Debounced repo path validation on input change
       useEffect(() => {
-        if (logsEndRef.current) {
-          logsEndRef.current.scrollIntoView({ behavior: "smooth" });
+        if (!repoPath || !repoPath.trim()) {
+          setRepoStatus({
+            exists: false,
+            is_dir: false,
+            is_git: false,
+            branch: "",
+            test_framework: null,
+            test_command: null,
+            is_valid: false,
+            status_summary: "empty"
+          });
+          setIsValidatingRepo(false);
+          return;
         }
-      }, [logs]);
 
-      const checkCustomRepo = (pathToCheck) => {
-        fetch(`/api/repo-info?path=${encodeURIComponent(pathToCheck)}`)
-          .then(res => res.json())
-          .then(data => {
-            setRepoStatus({
-              exists: data.exists,
-              is_git: data.is_git,
-              branch: data.branch
+        setIsValidatingRepo(true);
+        const timer = setTimeout(() => {
+          fetch(`/api/repo-info?path=${encodeURIComponent(repoPath.trim())}`)
+            .then(res => res.json())
+            .then(data => {
+              setRepoStatus({
+                exists: data.exists,
+                is_dir: data.is_dir,
+                is_git: data.is_git,
+                branch: data.branch,
+                test_framework: data.test_framework,
+                test_command: data.test_command,
+                is_valid: data.is_valid,
+                status_summary: data.status_summary
+              });
+              setIsValidatingRepo(false);
+            })
+            .catch(() => {
+              setIsValidatingRepo(false);
             });
-          })
-          .catch(() => {});
-      };
+        }, 350);
+
+        return () => clearTimeout(timer);
+      }, [repoPath]);
 
       const startBugFix = () => {
-        if (!bugReport.trim() || status === "running") return;
+        if (!bugReport.trim() || status === "running" || !repoStatus.is_valid) return;
 
         setStatus("running");
         setLogs([]);
@@ -659,44 +696,95 @@
               <div className="glass-card p-4 rounded-3xl shadow-2xl max-w-xl space-y-3.5 border-emerald-400/30">
                 
                 {/* Repo Path Input Section */}
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-200/80 uppercase tracking-wider px-1">
                     <span className="flex items-center gap-1.5">
                       <i className="fa-solid fa-folder-open text-emerald-300"></i>
                       <span>Target Repository To Fix</span>
                     </span>
-                    {repoStatus.exists ? (
-                      <span className="text-emerald-300 font-mono text-[10px] flex items-center gap-1">
-                        <i className="fa-solid fa-code-branch"></i> branch: {repoStatus.branch}
+                    {isValidatingRepo ? (
+                      <span className="text-emerald-300/80 font-mono text-[10px] flex items-center gap-1 animate-pulse">
+                        <i className="fa-solid fa-circle-notch fa-spin text-[10px]"></i> validating...
+                      </span>
+                    ) : repoStatus.is_valid ? (
+                      <span className="text-emerald-300 font-mono text-[10px] flex items-center gap-1 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                        <i className="fa-solid fa-circle-check text-[10px]"></i> Verified Git Repo
+                      </span>
+                    ) : repoStatus.exists ? (
+                      <span className="text-amber-300 font-mono text-[10px] flex items-center gap-1 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30">
+                        <i className="fa-solid fa-triangle-exclamation text-[10px]"></i> Not a Git repo
                       </span>
                     ) : (
-                      <span className="text-rose-300 text-[10px] font-bold">Path not found</span>
+                      <span className="text-rose-300 font-mono text-[10px] flex items-center gap-1 bg-rose-500/20 px-2 py-0.5 rounded-full border border-rose-500/30">
+                        <i className="fa-solid fa-circle-xmark text-[10px]"></i> Path not found
+                      </span>
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2 bg-black/30 border border-emerald-400/30 rounded-2xl px-3.5 py-2.5 focus-within:border-emerald-300 transition-all">
+                  <div className={`flex items-center gap-2 bg-black/30 border rounded-2xl px-3.5 py-2.5 transition-all ${
+                    repoStatus.is_valid
+                      ? "border-emerald-400/40 focus-within:border-emerald-300"
+                      : repoStatus.exists
+                      ? "border-amber-500/50 focus-within:border-amber-400"
+                      : "border-rose-500/50 focus-within:border-rose-400"
+                  }`}>
                     <i className="fa-solid fa-code-commit text-emerald-300 text-xs"></i>
                     <input
                       type="text"
                       value={repoPath}
-                      onChange={(e) => {
-                        setRepoPath(e.target.value);
-                        checkCustomRepo(e.target.value);
-                      }}
+                      onChange={(e) => setRepoPath(e.target.value)}
                       placeholder="Enter absolute or relative path to git repo..."
                       className="w-full bg-transparent text-xs font-mono text-emerald-100 placeholder-emerald-300/40 focus:outline-none"
                     />
                     {defaultRepoPath && repoPath !== defaultRepoPath && (
                       <button
-                        onClick={() => {
-                          setRepoPath(defaultRepoPath);
-                          checkCustomRepo(defaultRepoPath);
-                        }}
+                        onClick={() => setRepoPath(defaultRepoPath)}
                         className="text-[10px] font-semibold text-emerald-300 hover:text-white underline whitespace-nowrap"
                         title="Reset to default seed repo"
                       >
                         Reset
                       </button>
+                    )}
+                  </div>
+
+                  {/* Detailed Validation Badges */}
+                  <div className="px-1">
+                    {isValidatingRepo ? (
+                      <div className="flex items-center gap-1.5 text-[11px] text-emerald-300/70 font-mono py-0.5">
+                        <i className="fa-solid fa-circle-notch fa-spin text-xs"></i> Checking repository path on disk...
+                      </div>
+                    ) : repoStatus.is_valid ? (
+                      <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                        <span className="px-2.5 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-semibold flex items-center gap-1.5 shadow-sm">
+                          <i className="fa-solid fa-circle-check text-emerald-400 text-[10px]"></i>
+                          <span>Directory Found</span>
+                        </span>
+                        <span className="px-2.5 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-mono flex items-center gap-1.5 shadow-sm">
+                          <i className="fa-solid fa-code-branch text-emerald-400 text-[10px]"></i>
+                          <span>branch: <strong>{repoStatus.branch}</strong></span>
+                        </span>
+                        <span className="px-2.5 py-1 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-300 text-[11px] font-mono flex items-center gap-1.5 shadow-sm">
+                          <i className="fa-solid fa-flask text-teal-300 text-[10px]"></i>
+                          <span>Test runner: <strong>{repoStatus.test_framework || repoStatus.test_command || "pytest"}</strong></span>
+                        </span>
+                      </div>
+                    ) : repoStatus.exists ? (
+                      <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                        <span className="px-2.5 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-medium flex items-center gap-1.5">
+                          <i className="fa-solid fa-check text-[10px]"></i> Folder exists
+                        </span>
+                        <span className="px-2.5 py-1 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-[11px] font-medium flex items-center gap-1.5">
+                          <i className="fa-solid fa-triangle-exclamation text-amber-400 text-[10px]"></i>
+                          <span>Not a Git repo (run <code>git init</code> in this directory)</span>
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 pt-0.5">
+                        <span className="px-2.5 py-1 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-200 text-[11px] font-medium flex items-center gap-1.5">
+                          <i className="fa-solid fa-circle-xmark text-rose-400 text-xs"></i>
+                          <span>Directory does not exist. Check file path or use <code>./target_repo</code>.</span>
+                        </span>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -745,10 +833,12 @@
                 <div className="flex items-center gap-3 pt-1">
                   <button
                     onClick={startBugFix}
-                    disabled={status === "running"}
+                    disabled={status === "running" || !repoStatus.is_valid || isValidatingRepo}
                     className={`flex-1 py-3.5 px-6 rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-3 shadow-lg ${
                       status === "running"
                         ? "bg-emerald-950/80 text-emerald-300/50 cursor-not-allowed border border-emerald-500/20"
+                        : !repoStatus.is_valid || isValidatingRepo
+                        ? "bg-emerald-950/40 text-emerald-200/40 cursor-not-allowed border border-emerald-500/10"
                         : "bg-white text-emerald-950 hover:bg-emerald-50 hover:scale-[1.01] active:scale-[0.99] shadow-emerald-950/30"
                     }`}
                   >
@@ -756,6 +846,16 @@
                       <>
                         <i className="fa-solid fa-circle-notch fa-spin text-emerald-600"></i>
                         <span>Fixing autonomously in repo...</span>
+                      </>
+                    ) : isValidatingRepo ? (
+                      <>
+                        <i className="fa-solid fa-circle-notch fa-spin text-emerald-300"></i>
+                        <span>Checking repository...</span>
+                      </>
+                    ) : !repoStatus.is_valid ? (
+                      <>
+                        <i className="fa-solid fa-lock text-xs"></i>
+                        <span>Valid Git Repository Required</span>
                       </>
                     ) : (
                       <>

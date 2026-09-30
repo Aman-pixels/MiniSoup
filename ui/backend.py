@@ -2,7 +2,7 @@
 
 import asyncio
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Tuple
 import json
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -78,23 +78,91 @@ async def health_check():
     }
 
 
+def detect_test_framework(target: Path) -> tuple[Optional[str], Optional[str]]:
+    """Detect test runner and command for a given repository path."""
+    if not target.exists() or not target.is_dir():
+        return None, None
+
+    # 1. Pytest detection
+    try:
+        if (
+            (target / "pytest.ini").exists() or
+            (target / "conftest.py").exists() or
+            ((target / "setup.cfg").exists() and "pytest" in (target / "setup.cfg").read_text(encoding="utf-8", errors="ignore")) or
+            ((target / "pyproject.toml").exists() and "pytest" in (target / "pyproject.toml").read_text(encoding="utf-8", errors="ignore")) or
+            ((target / "requirements.txt").exists() and "pytest" in (target / "requirements.txt").read_text(encoding="utf-8", errors="ignore")) or
+            ((target / "tests").is_dir() and any((target / "tests").glob("test_*.py")))
+        ):
+            return "pytest", "pytest"
+    except Exception:
+        pass
+
+    # 2. Node/JS package.json test script detection
+    pkg_json = target / "package.json"
+    if pkg_json.exists():
+        try:
+            data = json.loads(pkg_json.read_text(encoding="utf-8", errors="ignore"))
+            scripts = data.get("scripts", {})
+            if "test" in scripts and "no test specified" not in scripts["test"].lower():
+                return f"npm test ({scripts['test'][:25]})", "npm test"
+        except Exception:
+            pass
+
+    # 3. Python unittest fallback
+    if (target / "tests").is_dir() or any(target.glob("test_*.py")):
+        return "python -m unittest", "python -m unittest discover"
+
+    # 4. Cargo test
+    if (target / "Cargo.toml").exists():
+        return "cargo test", "cargo test"
+
+    # 5. Go test
+    if (target / "go.mod").exists() or any(target.glob("*_test.go")):
+        return "go test", "go test ./..."
+
+    return None, None
+
+
 @app.get("/api/repo-info")
 async def get_repo_info(path: str = ""):
     target = Path(path).resolve() if path.strip() else Path(config.TARGET_REPO_PATH).resolve()
-    exists = target.exists()
-    is_git = (target / ".git").exists()
-    branch = "unknown"
-    if exists and is_git:
+    exists = target.exists() and target.is_dir()
+    
+    # Auto-initialize default seed target_repo if needed
+    if exists and target == Path(config.TARGET_REPO_PATH).resolve() and not (target / ".git").exists():
         try:
-            r = init_or_open_repo(target)
-            branch = r.active_branch.name
+            init_or_open_repo(target)
         except Exception:
-            branch = "main"
+            pass
+
+    is_git = False
+    branch = "unknown"
+    if exists:
+        try:
+            import git
+            r = git.Repo(target, search_parent_directories=False)
+            is_git = True
+            try:
+                branch = r.active_branch.name
+            except Exception:
+                branch = r.head.commit.hexsha[:8] if r.heads else "main"
+        except Exception:
+            is_git = False
+
+    test_framework, test_cmd = detect_test_framework(target) if exists else (None, None)
+    is_valid = bool(exists and is_git)
+    status_summary = "valid" if is_valid else ("not_git" if exists else "not_found")
+
     return {
         "path": str(target),
         "exists": exists,
+        "is_dir": target.is_dir() if target.exists() else False,
         "is_git": is_git,
         "branch": branch,
+        "test_framework": test_framework,
+        "test_command": test_cmd or config.DEFAULT_TEST_COMMAND,
+        "is_valid": is_valid,
+        "status_summary": status_summary,
         "default_path": str(Path(config.TARGET_REPO_PATH).resolve())
     }
 
